@@ -1,0 +1,12 @@
+name = Amazon SES Mail
+
+description = A high performance Amazon SES Mailer
+core = 7.x
+
+files[] = src/SESMailSystem.php
+
+dependencies[] = mailsystem
+dependencies[] = ultimate_cron
+dependencies[] = composer_manager
+
+

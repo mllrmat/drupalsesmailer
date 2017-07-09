@@ -1,0 +1,107 @@
+<?php 
+
+
+/**
+ * Implements hook_schema().
+ */
+function ses_mail_schema() {
+	
+	$schema['ses_mails'] = array(
+			'description' => 'Stores all mails sent by SES Mail.',
+			'fields' => array(
+					'mid' => array(
+							'type' => 'serial',
+							'not null' => TRUE,
+							'description' => 'Primary Key: Message ID.',
+					),
+					'module' => array(
+							'type' => 'varchar',
+							'length' => 100,
+							'not null' => FALSE,
+							'description' => "drupal module sending the message",
+					),
+					'mailkey' => array(
+							'type' => 'varchar',
+							'length' => 100,
+							'not null' => FALSE,
+							'description' => "message key within the module",
+					),
+					'destination' => array(
+							'type' => 'varchar',
+							'length' => 200,
+							'not null' => TRUE,
+							'description' => "recipient of the mail message",
+					),
+					'source' => array(
+							'type' => 'varchar',
+							'length' => 200,
+							'not null' => FALSE,
+							'description' => "from email address",
+					),
+					'replyto' => array(
+							'type' => 'varchar',
+							'length' => 200,
+							'not null' => FALSE,
+							'description' => "reply to email address",
+					),
+					'subject' => array(
+							'type' => 'varchar',
+							'length' => 200,
+							'not null' => FALSE,
+							'description' => "subject of the email",
+					),
+					'html' => array(
+							'type' => 'blob',
+							'not null' => FALSE,
+							'description' => "html body",
+					),
+					'text' => array(
+							'type' => 'blob',
+							'not null' => FALSE,
+							'description' => "text body",
+					),
+					'timestamp' => array(
+							'type' => 'int',
+							'length' => 10,
+							'not null' => TRUE,
+							'description' => "timestamp the message was prepared",
+					),
+					'messageid' => array(
+							'type' => 'varchar',
+							'length' => 200,
+							'not null' => FALSE,
+							'description' => "messageid returned from amazon",
+					),
+					'error' => array(
+							'type' => 'blob',
+							'not null' => FALSE,
+							'description' => "error message from amazon",
+					),
+					'sent' => array(
+							'type' => 'int',
+							'length' => 10,
+							'not null' => FALSE,
+					),
+					'open' => array(
+							'type' => 'int',
+							'length' => 10,
+							'not null' => FALSE,
+					),
+					'click' => array(
+							'type' => 'int',
+							'length' => 10,
+							'not null' => FALSE,
+					),
+					'client' => array(
+							'type' => 'varchar',
+							'length' => 500,
+							'not null' => FALSE,
+							'description' => "client on which the last open occured",
+					),
+						
+			),
+			'primary key' => array('mid'),
+	);
+
+	return $schema;
+}

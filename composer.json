@@ -1,0 +1,8 @@
+{
+    "require": {
+        "aws/aws-sdk-php": "2.*",
+        "pelago/emogrifier": "1.*",
+        "symfony/polyfill-apcu": "*"
+        
+    }
+}

@@ -1,0 +1,432 @@
+<?php 
+
+use Aws\Ses\SesClient;
+use Aws\CommandPool;
+use Aws\CommandInterface;
+use Aws\ResultInterface;
+use GuzzleHttp\Promise\PromiseInterface;
+
+/**
+ * Implements hook_cronapi()
+ */
+
+
+function ses_mail_cronapi(){
+	$items = array();
+
+	$items['ses_mail_process_pool'] = array(
+			'title' => t('Amazon SES Send Pooled'),
+			'module' => 'ses_mail',
+			'callback' => 'ses_process_mails',
+			'scheduler' => array(
+					'name' => 'crontab',
+					'crontab' => array(
+							'rules' => array('* * * * *'),
+					),
+			),
+	);
+	
+	
+	$items['ses_mail_clear_pool_success'] = array(
+			'title' => t('Amazon SES Clear Successful Sends'),
+			'module' => 'ses_mail',
+			'callback' => 'clear_successful_sends',
+			'scheduler' => array(
+					'name' => 'crontab',
+					'crontab' => array(
+							'rules' => array('1 1 * * *'),
+					),
+			),
+	);
+
+	$items['ses_mail_clear_pool_errors'] = array(
+			'title' => t('Amazon SES Clear Failed Sends'),
+			'module' => 'ses_mail',
+			'callback' => 'clear_failed_sends',
+			'scheduler' => array(
+					'name' => 'crontab',
+					'crontab' => array(
+							'rules' => array('1 1 * * *'),
+					),
+			),
+	);
+	
+	return $items;
+
+}
+
+/**
+ * Implements hook_theme().
+ */
+function ses_mail_theme($existing, $type, $theme, $path)
+{
+	$config = array(
+			'sesmail' => array(
+					'template' => 'sesmail',
+					'variables' => array(
+							'message' => '',
+					),
+					'path' => drupal_get_path('module', 'ses_mail'),
+					'mail theme' => TRUE,
+			),
+			'plain' => array(
+					'template' => 'plain',
+					'variables' => array(
+							'message' => '',
+					),
+					'path' => drupal_get_path('module', 'ses_mail'),
+					'mail theme' => TRUE,
+			),
+	);
+
+	return $config;
+
+}
+
+
+function ses_mail_send(array $mails){
+	
+	$conf = variable_get('ses_mail');
+	if(!isset($conf['awskey'])){
+		watchdog('SES Mail', 'Configuration Missing!', array(), WATCHDOG_EMERGENCY);
+		return false; 
+	}
+	
+	$client = SesClient::factory(array(
+			'key' => $conf['awskey'],
+			'secret' => $conf['awssecret'],
+			'region' => $conf['awsregion']
+	));
+	
+	$starttime = time();
+	$counter = 0; 
+	$concurrency = $conf['concurrency'];
+	$commands = array();
+	$lastmid = end($mails)->mid;
+	
+	foreach($mails as $mail){
+		
+		$counter++;
+		
+		$args = array(
+				// Source is required
+				'Source' => $mail->source,
+				// Destination is required
+				'Destination' => array(
+						'ToAddresses' => array($mail->destination),
+						//'CcAddresses' => array('string', ... ),
+						//'BccAddresses' => array('string', ... ),
+				),
+				// Message is required
+				'Message' => array(
+						// Subject is required
+						'Subject' => array(
+								// Data is required
+								'Data' => $mail->subject,
+								'Charset' => 'utf-8',
+						),
+						// Body is required
+						'Body' => array(
+								'Text' => array(
+										// Data is required
+										'Data' => $mail->text,
+										'Charset' => 'utf-8',
+								),
+								'Html' => array(
+										// Data is required
+										'Data' => $mail->html,
+										'Charset' => 'utf-8',
+								),
+						),
+				),
+				'mid' => $mail->mid
+				//'ReplyToAddresses' => array('string'),
+				//'ReturnPath' => 'string',
+				//'SourceArn' => 'string',
+				//'ReturnPathArn' => 'string',
+		);
+		
+		$commands[] = $client->getCommand('sendEmail', $args);
+		
+		//we send the mails in batches of the given concurrency to avoid to many open connections and reaching the sending limit per second
+		if($lastmid == $mail->mid || $counter == $concurrency){
+			
+			try {
+				$succeeded = $client->execute($commands);
+			} catch (Exception $e) {
+				$succeeded = $e->getSuccessfulCommands();
+				foreach ($e->getFailedCommands() as $failedCommand) {
+					$mid = $failedCommand->get('mid');
+					$error = $e->getExceptionForFailedCommand($failedCommand)->getMessage();
+					watchdog('SES Mail', "Error: $error");
+					store_ses_result($mid, array('error' => $error));
+				}
+			}
+			
+			// Loop over the commands, which have now all been executed
+			foreach ($succeeded as $command) {
+				$mid = $command->get('mid');
+				$result = $command->getResult();
+				$messageId = $result->get('MessageId');
+			
+				store_ses_result($mid, array('messageid' => $messageId, 'sent' => time()));
+			}
+			
+			$duration = time() - $starttime;
+			watchdog('SES Mail', "processed $counter mails in $duration seconds");
+			
+			// so ease the mail sending we add the option to wait between concurrent batches, this was the sending limit per second should not be reached. 
+			sleep($conf['seconds_between_batches']);
+			
+			//reset counter and concurrency
+			$counter = 0; 
+			$commands = array();
+			$starttime = time();
+			
+		}
+				
+	}
+	
+	
+	
+// only with api v3 :(
+// 	$pool_configuration = array(
+// 			// Only send 5 files at a time (this is set to 25 by default).
+// 			'concurrency' => 50,
+// 			// Invoke this function before executing each command.
+// // 			'before' => function (CommandInterface $cmd, $iterKey) {
+// // 			echo "About to send {$iterKey}: "
+// // 			. print_r($cmd->toArray(), true) . "\n";
+// // 			},
+// 			// Invoke this function for each successful transfer.
+// 			'fulfilled' => 'ses_send_success',
+// 			// Invoke this function for each failed transfer.
+// 			'rejected' => 'ses_send_failed',
+// 	);
+	
+// 	$pool = new CommandPool($client, $commands, $pool_configuration);
+	
+// 	// Initiate the pool transfers
+// 	$promise = $pool->promise();
+	
+// 	$promise->wait();
+	
+}
+
+function store_ses_result($mid, array $fields){
+	db_update('ses_mails')
+	->fields($fields)
+	->condition('mid', $mid)
+	->execute();
+}
+
+
+// only with api v3 :(
+// function ses_send_success(ResultInterface $result, $iterKey, PromiseInterface $aggregatePromise){
+// 	debug("Completed {$iterKey}: {$result}");
+// }
+
+// function ses_send_failed(ResultInterface $result, $iterKey, PromiseInterface $aggregatePromise){
+// 	debug("Failed {$iterKey}: {$reason}");
+// }
+
+function ses_process_mails(){
+	//getting the mails from the pool
+	
+	$conf = variable_get('ses_mail');
+	if(!isset($conf['awskey'])){
+		watchdog('SES Mail', 'Configuration Missing!', array(), WATCHDOG_EMERGENCY);
+		return false;
+	}
+	
+	$starttime = time();
+	
+	$result = db_select('ses_mails', 'm')
+	->fields('m')
+	->isNull('error')
+	->isNull('messageid')
+	->isNull('sent')
+	->range(0,$conf['mails_per_cron_run'])
+	->execute();
+	
+	$rowcount = $result->rowCount();
+	
+	watchdog('SES Mail', "processing $rowcount mails");
+	
+	if($rowcount > 0){
+		$mails = $result->fetchAllAssoc('mid');
+		ses_mail_send($mails);
+	}
+		
+	$duration = time() - $starttime;
+	watchdog('SES Mail', "Sending took $duration seconds");
+	
+	//}
+	
+}
+
+/**
+ * implement hook_mail_alter()
+ * @param unknown $message
+ */
+function ses_mail_mail_alter(&$message){
+	$conf = variable_get('ses_mail');
+	if(!isset($conf['send_direct'])){
+		drupal_set_message('error', 'SES Mail Configuration Missing!');
+	}
+	if(in_array($message['key'], $conf['send_direct'])){
+		$message['send_direct'] = true; 
+	}
+	
+	if($message['key'] == 'test message'){
+		//$message['themehook'] = 'plain';
+	}
+}
+
+/**
+ * deletes the mail contents after 24hours to ease database usage
+ */
+function clear_successful_sends(){
+	$conf = variable_get('ses_mail');
+	$seconds = 86400; 
+	if(isset($conf['clear_successful_sends'])){
+		$seconds = $conf['delete_successful_sends'];
+	}
+	db_update('ses_mails')
+	->fields(array('html' => null, 'text' => null))
+	->condition('sent', (time() - $seconds), '<')
+	->execute();
+}
+
+/**
+ * deletes all mails after 30 days to ease database usage
+ */
+function clear_failed_sends(){
+	$conf = variable_get('ses_mail');
+	$seconds = 2592000;
+	if(isset($conf['clear_failed_sends'])){
+		$seconds = $conf['clear_failed_sends'];
+	}
+	db_delete('ses_mails')
+	->condition('sent', (time() - $seconds), '<')
+	->isNull('error')
+	->execute();
+}
+
+
+/**
+ * Implements hook_menu().
+ *
+ * Only used for testing purposes execute Drupal's mail system
+ */
+function ses_mail_menu()
+{
+	$items = array();
+
+	$items['ses_mail/test'] = array(
+			'title' => 'Send test emails',
+			'description' => 'Just send a test mail',
+			'page callback' => 'drupal_get_form',
+			'page arguments' => array(
+					'ses_mail_test_send_form'
+			),
+			'access callback' => 'user_is_admin',
+	);
+
+	return $items;
+}
+
+
+/**
+ * Callback for sending test emails
+ *
+ * Only used for testing purposes execute Drupal's mail system
+ */
+function ses_mail_test_send_form($form, &$form_state)
+{
+	$form['themehook'] = array(
+			'#type' => 'textfield',
+			'#title' => 'Theme hook to use: ',
+			'#size' => 20,
+			'#maxlength' => 100,
+			'#default_value' => 'sesmail',
+			'#required' => TRUE
+	);
+	
+	$form['from'] = array(
+			'#type' => 'textfield',
+			'#title' => 'From: ',
+			'#size' => 20,
+			'#maxlength' => 100,
+			'#default_value' => 'jan@fragnebenan.com',
+			'#required' => TRUE
+	);
+
+	$form['to'] = array(
+			'#type' => 'textfield',
+			'#title' => 'Recipient: ',
+			'#size' => 20,
+			'#maxlength' => 100,
+			'#default_value' => 'jan@fragnebenan.com',
+			'#required' => TRUE
+	);
+
+	$form['reply-to'] = array(
+			'#type' => 'textfield',
+			'#title' => 'Reply to: ',
+			'#size' => 20,
+			'#maxlength' => 100,
+			'#required' => FALSE
+	);
+
+	$form['subject'] = array(
+			'#type' => 'textfield',
+			'#title' => 'Subject: ',
+			'#size' => 15,
+			'#maxlength' => 20,
+			'#default_value' => 'SES Mail Test Email',
+			'#required' => TRUE
+	);
+
+	$form['body'] = array(
+			'#type' => 'textarea',
+			'#title' => 'Message: ',
+			'#default_value' => '<div>Hello, <br> greetings to the world. <br> Yours, SES Mail</div>',
+			'#required' => TRUE
+	);
+	
+	$form['send_direct'] = array(
+			'#type' => 'checkbox',
+			'#title' => 'Send Direct: ',
+	);
+
+	$form['submit'] = array(
+			'#type' => 'submit',
+			'#value' => t('Send')
+	);
+
+	return $form;
+}
+
+function ses_mail_test_send_form_submit($form, &$form_state)
+{
+	$params = array(
+			'data' => $form_state['values']
+	); // for testing purposes only
+
+	drupal_mail('ses_mail', 'ses_test', $form_state['values']['to'], language_default(), $params, $form_state['values']['from']);
+
+}
+
+function ses_mail_mail($key, &$message, $params)
+{
+	$message['id'] = isset($message['id']) ? $message['id'] : NULL;
+	$message['subject'] = $params['data']['subject'];
+	$message['body'] = array($params['data']['body']);
+	$message['themehook'] = $params['data']['themehook'];
+	
+	if($params['data']['send_direct']){
+		$message['send_direct'] = true; 
+	}
+
+}
