@@ -13,7 +13,7 @@ You may style your emails using templates and all css is inlined using the emogr
 alternative is generated. You may use a template per mail key.    
 
 
--- REQUIREMENTS --
+## REQUIREMENTS
 Of course you need an Amazon AWS account.
 In addition this module relies on:
 * Mail System
@@ -21,12 +21,12 @@ In addition this module relies on:
 * Composer Manager (to include the Emogrifier Library)
 
 
--- INSTALLATION --
+## INSTALLATION
 Install Mail System, Ultimate Cron and Composer Manager on your Drupal site.
 Enable this module. Run "composer update".
 Include the configuration options (see below) in your settings.php.
 
--- CONFIGURATION --
+## CONFIGURATION
 Include the following configuration options in your settings.php file:
 
 required:
@@ -43,17 +43,17 @@ $conf['ses_mail']['delete_successful_sends'] = 86400; --> this will clear the ht
 $conf['ses_mail']['clear_failed_sends'] = 2592000; --> this will clear the complete mail row in the database after 30 days
 
 
--- CUSTOMIZATION --
+## CUSTOMIZATION
 You may create a sesmail.tpl.php template in your mail theme's template folder and a corresponding css file.
 
-Example:
+### Example:
 template: sites/all/themes/yourtheme/templates/sesmail.tpl.php
 css:  sites/all/themes/yourtheme/css/sesmail.css
 
 In addition it is possible to define template files and corresponding css files for individual mail keys.
 To use this you have to implement hook_mail_alter() and set $message['themehook'] = mailthemehook.
 
-Example:
+### Example:
 // hook_theme()
 function yourmodule_theme(){
     $config = 'mailthemehook' => array(
@@ -79,18 +79,13 @@ sites/all/themes/yourtheme/templates/mailtemplate.tpl.php
 sites/all/themes/yourtheme/css/mailtemplate.css
 
 
--- TROUBLESHOOTING --
+## TROUBLESHOOTING
 If the Emogrifier Library is not found after install run "composer dumpautoload" in your composer directory.
 
 You can test send emails using http://yoursite.com/ses_mail/test
 
--- FAQ --
-
-
--- CONTACT --
-
 Current maintainers:
-* Mathias Müller (muellm) - http://drupal.org/user/
+* Mathias Müller (muellm)
 
 This project has been sponsored by:
 * FRAGNEBENAN
