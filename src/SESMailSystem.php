@@ -77,7 +77,7 @@ class SESMailSystem implements MailSystemInterface {
 					$pos = strpos($source, '<');
 					$name = trim(substr($source, 0, $pos));
 					$email = trim(strrchr($source, '<'));
-					$source = '=?utf8?q?' . str_replace(' ', '=20', quoted_printable_encode($name)) . '?= ' . $email;
+					$source = '=?utf-8?q?' . str_replace(' ', '=20', quoted_printable_encode($name)) . '?= ' . $email;
 				}
 				
 				$data = array();
